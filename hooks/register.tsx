@@ -1,4 +1,7 @@
-import type { BuiltinToolResults, Register } from 'claude-code'
+import { atom, read, update } from 'claude-code'
+import type { BuiltinToolResults, EngineInterface, PromptSubmitAttachment, Register } from 'claude-code'
+
+import type { PastedImage } from '../types'
 
 type TOutput = BuiltinToolResults['SendUserFile']
 type TReadOutput = BuiltinToolResults['Read']
@@ -17,6 +20,12 @@ const MAX_READ_BYTES = 4 * 1024 * 1024
 const MAX_INLINE_BYTES = 2 * 1024 * 1024
 const CACHE_LIMIT = 24
 const FALLBACK_SIZE: TSize = { width: 1600, height: 1000 }
+const PASTED_LIMIT = 8
+
+// Pasted images, kept by the prompt they came with so its transcript row can
+// draw them. Change the tag when a field changes: it declines what an earlier
+// version stored, which outlives a reload.
+const pasted = atom({ plugin: 'inline-images', key: 'pasted' } as const, [], { shape: 'pasted-1' })
 
 const pictures = new Map<string, TPicture>()
 const readPaths = new Map<string, string>()
@@ -100,7 +109,83 @@ const readImage = (output: unknown, path?: string): TReadImage | null => {
   return size ? { base64, size, path } : null
 }
 
+// The prompt as the transcript row and the submission both know it: the
+// composer's `[Image #N]` placeholders and spacing don't count.
+const promptKey = (text: string) =>
+  text
+    .replace(/\[Image #\d+\]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+// One pasted image's bytes, read while its prompt.submit is in flight; the
+// engine's resized copy, so at most what the model is sent. One call covers
+// it: anything past MAX_INLINE_BYTES is left to the engine's own row.
+const readPasted = async ($: EngineInterface, item: PromptSubmitAttachment): Promise<PastedImage | null> => {
+  if (item.type !== 'image' || !item.id) return null
+
+  const media = await $.prompt.media({ id: item.id })
+  if (media.base64 === undefined || media.next !== undefined) return null
+  if (media.mediaType !== 'image/png' || media.size > MAX_INLINE_BYTES) return null
+
+  const size = pngSize(media.base64)
+  return size ? { png: media.base64, ...size } : null
+}
+
 export const register: Register = on => {
+  on('prompt.submit', async ($, e, next) => {
+    const images: PastedImage[] = []
+    for (const item of e.attachments ?? []) {
+      const image = await readPasted($, item)
+      if (image) images.push(image)
+    }
+
+    const entered = await next(e)
+
+    if (images.length > 0 && entered.drop === undefined) {
+      const keys = new Set([promptKey(e.text), promptKey(entered.text)])
+      await update($, pasted, list => [
+        ...list.filter(prompt => !keys.has(prompt.key)),
+        ...[...keys].map(key => ({ key, images })),
+      ].slice(-PASTED_LIMIT))
+    }
+
+    return entered
+  }).catch(($, e, next) => next(e))
+
+  on('ui.render', { component: 'UserMessage' }, async ($, e, next) => {
+    if (e.surface !== 'terminal' || e.props.task || e.props.from) return next(e)
+
+    const key = promptKey(e.props.text)
+    const list = await read($, pasted)
+    const prompt = [...list].reverse().find(one => one.key === key)
+    if (!prompt) return next(e)
+
+    const row = await next(e)
+    const viewportColumns = e.viewport?.columns ?? READ_MAX_COLUMNS + MARGIN
+    const maxColumns = Math.max(10, Math.min(READ_MAX_COLUMNS, viewportColumns - MARGIN))
+    const { Box, Image } = $.ui.resolve(e)
+
+    return (
+      <Box flexDirection="column" gap={1}>
+        {row}
+        {prompt.images.map((image, index) => {
+          const box = boxFor(image, maxColumns, READ_MAX_ROWS)
+
+          return (
+            <Box key={`pasted:${index}`} marginLeft={2}>
+              <Image
+                source={{ png: image.png }}
+                columns={box.columns}
+                rows={box.rows}
+                alt={`[Image #${index + 1}]`}
+              />
+            </Box>
+          )
+        })}
+      </Box>
+    )
+  })
+
   on('ui.render', { component: 'ToolGroup' }, async ($, e, next) => {
     if (e.surface !== 'terminal' || e.props.isExpanded) return next(e)
 

@@ -1,8 +1,9 @@
 {
   "name": "inline-images",
-  "version": "0.2.0",
-  "description": "Draws PNG images inline in the Claude Code terminal (Ghostty, kitty, tmux with passthrough): the ones Claude reads and the ones it sends you",
+  "version": "0.3.0",
+  "description": "Draws PNG images inline in the Claude Code terminal (Ghostty, kitty, tmux with passthrough): the ones Claude reads, the ones it sends you and the ones you paste",
   "author": { "name": "Brian Pravato" },
   "license": "MIT",
-  "repository": "https://github.com/kbrianps/claude-inline-images"
+  "repository": "https://github.com/kbrianps/claude-inline-images",
+  "types": "./types/index.d.ts"
 }

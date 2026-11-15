@@ -4,8 +4,9 @@ A Claude Code mod that draws PNG images right in your terminal, instead of a one
 
 - **Images Claude reads** (the `Read` tool on a `.png`) show up small under the "Read N files" line, in any session.
 - **Images Claude sends you** (the `SendUserFile` tool, in Remote Control sessions) show up large, with the caption above.
+- **Images you paste** into the prompt show up small under your message once you send it.
 
-Each image has its path below it as a link: click it to open the file in your system image viewer.
+Each image Claude reads or sends has its path below it as a link: click it to open the file in your system image viewer. A pasted image has no file, so it has no link.
 
 ![Before and after: a PNG Claude reads, drawn inline in Ghostty](assets/demo.gif)
 
@@ -56,6 +57,7 @@ set -g focus-events on
 - When a group of reads is expanded (ctrl+o), Claude Code's own rows are shown.
 - Desktop app, VS Code extension and mobile are left untouched.
 - `SendUserFile` exists only in Remote Control sessions (`claude --remote-control` or `/rc`); reads work everywhere.
+- A pasted image is drawn from the copy Claude Code sends the model, after its own resize, and only while it is a PNG of 2 MiB or less. It is matched to your message by the message's text, and only the last 8 prompts with pasted images are kept, so an older message, or one whose text an earlier prompt repeated, may show its row alone or the later prompt's image.
 
 ## Development
 

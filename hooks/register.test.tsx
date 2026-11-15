@@ -133,3 +133,66 @@ test('leaves an expanded group and a JPEG read to the engine', async ($, on) => 
     await ui.unmount()
   }
 })
+
+const message = (text: string, surface: 'terminal' | 'desktop' = 'terminal') =>
+  ({
+    plugin: 'inline-images',
+    component: 'UserMessage',
+    requestId: 'message_1',
+    surface,
+    props: { text, origin: { kind: 'composer' }, isExpanded: false },
+  }) as const
+
+const stored = (key: string) =>
+  ({
+    value: {
+      value: { shape: 'pasted-1', value: [{ key, images: [{ png: TINY_PNG, width: 4, height: 2 }] }] },
+      version: 1,
+    },
+  }) as const
+
+test('draws an image pasted with a prompt under that prompt', async ($, on) => {
+  engine(on)
+  on('state.get', () => stored('what is this'))
+  const ui = await $.ui.mount(message('[Image #1] what is this'))
+
+  expect(await ui.find({ type: 'Image' })).toBeTruthy()
+  expect((await ui.find({ type: 'Text', text: /engine/ }))?.text).toBe('engine')
+  await ui.unmount()
+})
+
+test('leaves other prompts and other surfaces to the engine', async ($, on) => {
+  engine(on)
+  on('state.get', () => stored('what is this'))
+
+  for (const mounted of [message('something else'), message('what is this', 'desktop')]) {
+    const ui = await $.ui.mount(mounted)
+    expect(await ui.find({ type: 'Image' })).toBeFalsy()
+    expect((await ui.find({ type: 'Text', text: /engine/ }))?.text).toBe('engine')
+    await ui.unmount()
+  }
+})
+
+test('declines pasted images an earlier version stored', async ($, on) => {
+  engine(on)
+  on('state.get', () => ({ value: { value: [{ key: 'what is this', images: [] }], version: 1 } }))
+  const ui = await $.ui.mount(message('what is this'))
+
+  expect(await ui.find({ type: 'Image' })).toBeFalsy()
+  await ui.unmount()
+})
+
+test('a prompt without images goes through untouched and stores nothing', async ($, on) => {
+  engine(on)
+  on('prompt.submit', (_, e) => ({ text: e.text }))
+  const writes: unknown[] = []
+  on('state.set', (_, e) => {
+    writes.push(e)
+    return { value: { isSet: true, version: 1 } } as const
+  })
+
+  const entered = await $.prompt.submit({ text: 'hello', wait: false, origin: { kind: 'composer' } })
+
+  expect(entered.text).toBe('hello')
+  expect(writes.length).toBe(0)
+})
