@@ -1,6 +1,6 @@
 export type PastedImage = { png: string; width: number; height: number }
 
-export type PastedPrompt = { key: string; images: PastedImage[] }
+export type PastedPrompt = { keys: string[]; images: PastedImage[] }
 
 declare module 'claude-code' {
   interface PluginState {

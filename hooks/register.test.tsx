@@ -143,17 +143,14 @@ const message = (text: string, surface: 'terminal' | 'desktop' = 'terminal') =>
     props: { text, origin: { kind: 'composer' }, isExpanded: false },
   }) as const
 
-const stored = (key: string) =>
-  ({
-    value: {
-      value: { shape: 'pasted-1', value: [{ key, images: [{ png: TINY_PNG, width: 4, height: 2 }] }] },
-      version: 1,
-    },
-  }) as const
+const IMG = { png: TINY_PNG, width: 4, height: 2 }
+
+const stored = (...prompts: { keys: string[]; images: (typeof IMG)[] }[]) =>
+  ({ value: { value: { shape: 'pasted-2', value: prompts }, version: 1 } }) as const
 
 test('draws an image pasted with a prompt under that prompt', async ($, on) => {
   engine(on)
-  on('state.get', () => stored('what is this'))
+  on('state.get', () => stored({ keys: ['[Image #1] what is this', 'what is this'], images: [IMG] }))
   const ui = await $.ui.mount(message('[Image #1] what is this'))
 
   expect(await ui.find({ type: 'Image' })).toBeTruthy()
@@ -163,7 +160,7 @@ test('draws an image pasted with a prompt under that prompt', async ($, on) => {
 
 test('leaves other prompts and other surfaces to the engine', async ($, on) => {
   engine(on)
-  on('state.get', () => stored('what is this'))
+  on('state.get', () => stored({ keys: ['[Image #1] what is this', 'what is this'], images: [IMG] }))
 
   for (const mounted of [message('something else'), message('what is this', 'desktop')]) {
     const ui = await $.ui.mount(mounted)
@@ -175,7 +172,7 @@ test('leaves other prompts and other surfaces to the engine', async ($, on) => {
 
 test('declines pasted images an earlier version stored', async ($, on) => {
   engine(on)
-  on('state.get', () => ({ value: { value: [{ key: 'what is this', images: [] }], version: 1 } }))
+  on('state.get', () => ({ value: { value: { shape: 'pasted-1', value: [{ key: 'what is this', images: [IMG] }] }, version: 1 } }))
   const ui = await $.ui.mount(message('what is this'))
 
   expect(await ui.find({ type: 'Image' })).toBeFalsy()
@@ -195,4 +192,16 @@ test('a prompt without images goes through untouched and stores nothing', async 
 
   expect(entered.text).toBe('hello')
   expect(writes.length).toBe(0)
+})
+
+test('two prompts of an image alone each draw their own', async ($, on) => {
+  engine(on)
+  const other = { ...IMG, width: 8 }
+  on('state.get', () => stored({ keys: ['[Image #1]'], images: [IMG] }, { keys: ['[Image #2]'], images: [other] }))
+
+  for (const [text, count] of [['[Image #1]', 1], ['[Image #2]', 1], ['', 0]] as const) {
+    const ui = await $.ui.mount(message(text))
+    expect((await ui.findAll({ type: 'Image' })).length).toBe(count)
+    await ui.unmount()
+  }
 })

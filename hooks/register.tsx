@@ -25,7 +25,7 @@ const PASTED_LIMIT = 8
 // Pasted images, kept by the prompt they came with so its transcript row can
 // draw them. Change the tag when a field changes: it declines what an earlier
 // version stored, which outlives a reload.
-const pasted = atom({ plugin: 'inline-images', key: 'pasted' } as const, [], { shape: 'pasted-1' })
+const pasted = atom({ plugin: 'inline-images', key: 'pasted' } as const, [], { shape: 'pasted-2' })
 
 const pictures = new Map<string, TPicture>()
 const readPaths = new Map<string, string>()
@@ -109,13 +109,17 @@ const readImage = (output: unknown, path?: string): TReadImage | null => {
   return size ? { base64, size, path } : null
 }
 
-// The prompt as the transcript row and the submission both know it: the
-// composer's `[Image #N]` placeholders and spacing don't count.
-const promptKey = (text: string) =>
-  text
-    .replace(/\[Image #\d+\]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
+const squash = (text: string) => text.replace(/\s+/g, ' ').trim()
+
+// The keys a prompt is found by, best first: its text as typed, with the
+// composer's `[Image #N]` placeholders that set it apart from other pastes,
+// then the text without them, in case a row drops them. A prompt of images
+// alone has no second key, since every such prompt would share it.
+const promptKeys = (text: string) => {
+  const exact = squash(text)
+  const bare = squash(text.replace(/\[Image #\d+\]/g, ' '))
+  return bare && bare !== exact ? [exact, bare] : [exact]
+}
 
 // One pasted image's bytes, read while its prompt.submit is in flight; the
 // engine's resized copy, so at most what the model is sent. One call covers
@@ -142,11 +146,10 @@ export const register: Register = on => {
     const entered = await next(e)
 
     if (images.length > 0 && entered.drop === undefined) {
-      const keys = new Set([promptKey(e.text), promptKey(entered.text)])
-      await update($, pasted, list => [
-        ...list.filter(prompt => !keys.has(prompt.key)),
-        ...[...keys].map(key => ({ key, images })),
-      ].slice(-PASTED_LIMIT))
+      const keys = [...new Set([...promptKeys(e.text), ...promptKeys(entered.text)])]
+      await update($, pasted, list =>
+        [...list, { keys, images }].slice(-PASTED_LIMIT),
+      )
     }
 
     return entered
@@ -155,9 +158,10 @@ export const register: Register = on => {
   on('ui.render', { component: 'UserMessage' }, async ($, e, next) => {
     if (e.surface !== 'terminal' || e.props.task || e.props.from) return next(e)
 
-    const key = promptKey(e.props.text)
-    const list = await read($, pasted)
-    const prompt = [...list].reverse().find(one => one.key === key)
+    const list = [...(await read($, pasted))].reverse()
+    const prompt = promptKeys(e.props.text)
+      .map(key => list.find(one => one.keys.includes(key)))
+      .find(one => one !== undefined)
     if (!prompt) return next(e)
 
     const row = await next(e)
